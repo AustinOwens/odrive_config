@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 These configurations are based off of the hoverboard tutorial found on the
 Odrive Robotics website located here:
@@ -7,6 +8,7 @@ https://docs.odriverobotics.com/hoverboard
 @date: 3/14/2021
 """
 
+import argparse
 import sys
 import time
 
@@ -154,11 +156,18 @@ class HBMotorConfig:
         # want to make sure that some of the above settings that require a
         # reboot are applied first.
 
+        # Motors must be in IDLE mode before saving
+        self.odrv_axis.requested_state = AXIS_STATE_IDLE
         try:
             print("Saving manual configuration and rebooting...")
-            self.odrv.save_configuration()
+            is_saved = self.odrv.save_configuration()
+            if not is_saved:
+                print("Error: Configuration not saved. Are all motors in IDLE state?")
+            else:
+                print("Calibration configuration saved.")
+
             print("Manual configuration saved.")
-        except Exception:
+        except Exception as e:
             pass
 
         self._find_odrive()
@@ -264,16 +273,16 @@ class HBMotorConfig:
         # If all looks good, then lets tell ODrive that saving this calibration
         # to persistent memory is OK
         self.odrv_axis.encoder.config.pre_calibrated = True
-        
-        
+
         print("Calibrating Odrive for anticogging...")
         self.odrv_axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+
         self.odrv_axis.controller.start_anticogging_calibration()
-        
+
         while self.odrv_axis.controller.config.anticogging.calib_anticogging:
             time.sleep(15)
             print("Still calibrating anticogging...")
-            
+
         if self.odrv_axis.controller.error != 0:
             print(
                 "Error: Odrive reported an error of {} while performing "
@@ -284,16 +293,21 @@ class HBMotorConfig:
             )
 
             sys.exit(1)
-        
+
         # If all looks good, then lets tell ODrive that saving this calibration
         # to persistent memory is OK
         self.odrv_axis.controller.config.anticogging.pre_calibrated = True
 
+        # Motors must be in IDLE mode before saving
+        self.odrv_axis.requested_state = AXIS_STATE_IDLE
         try:
             print("Saving calibration configuration and rebooting...")
             self.odrv.save_configuration()
-            print("Calibration configuration saved.")
-        except Exception:
+            if not is_saved:
+                print("Error: Configuration not saved. Are all motors in IDLE state?")
+            else:
+                print("Calibration configuration saved.")
+        except Exception as e:
             pass
 
         self._find_odrive()
@@ -326,22 +340,49 @@ class HBMotorConfig:
 
 
 if __name__ == "__main__":
-    hb_motor_config = HBMotorConfig(axis_num=1, erase_config=False)
-    hb_motor_config.configure()
-    print(
-        "Placing motor 0 in close loop control. If you move motor, motor will "
-        "resist you."
+    parser = argparse.ArgumentParser(description="Hoverboard Motor Calibration")
+
+    # Argument for axis_num
+    parser.add_argument(
+        "--axis_num",
+        type=int,
+        choices=[0, 1],  # Only allow 0 or 1
+        required=True,
+        help="Motor axis number which can only be 0 or 1.",
     )
-    hb_motor_config.mode_close_loop_control()
 
-    # print("CONDUCTING MOTOR TEST")
+    # Argument for erase_config
+    parser.add_argument(
+        "--erase_config",
+        action="store_true",  # If present, set to True. If absent, set to False.
+        help="Flag to determine if the config should be erased.",
+    )
 
-    # Go from 0 to 360 degrees in increments of 30 degrees
-    # for angle in range(0, 390, 30):
-    #    print("Setting motor to {} degrees.".format(angle))
-    #    hb_motor_config.move_input_pos(angle)
-    #    time.sleep(5)
-    #
-    # print("Placing motor in idle. If you move motor, motor will "
-    #      "move freely")
-    # hb_motor_config.mode_idle()
+    # Argument to conduct motor test (make sure motor can move freely)
+    parser.add_argument(
+        "--motor_test",
+        action="store_true",  # If present, set to True. If absent, set to False.
+        help="Flag to determine if the config should be erased.",
+    )
+
+    args = parser.parse_args()
+
+    hb_motor_config = HBMotorConfig(
+        axis_num=args.axis_num, erase_config=args.erase_config
+    )
+    hb_motor_config.configure()
+
+    if args.motor_test:
+        print("Placing motor in close loop. If you move motor, motor will resist you.")
+        hb_motor_config.mode_close_loop_control()
+
+        print("CONDUCTING MOTOR TEST")
+
+        # Go from 0 to 360 degrees in increments of 30 degrees
+        for angle in range(0, 390, 30):
+            print("Setting motor to {} degrees.".format(angle))
+            hb_motor_config.move_input_pos(angle)
+            time.sleep(5)
+
+        print("Placing motor in idle. If you move motor, motor will move freely")
+        hb_motor_config.mode_idle()
